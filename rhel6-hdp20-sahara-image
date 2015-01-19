@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# This script must be run as root.
+
+export ROOT_DIR=`pwd`
+ls ./rhel-guest-image-6.6*.qcow2*
+if [ $? != 0 ]; then
+    echo "Please download a rhel 6.6 guest qcow2 image to the current working directory."
+    exit 1
+fi
+export BASE_IMAGE_FILE=`ls rhel-guest-image-6.6*.qcow2 | tail -n 1`
+export DIB_CLOUD_IMAGES=file://$ROOT_DIR
+
+if [ -z "$DIB_RHSM_USER" ]; then
+    echo "Please set env variable DIB_RHSM_USER."
+    exit 1
+fi
+if [ -z "$DIB_RHSM_PASSWORD" ]; then
+    echo "Please set env variable DIB_RHSM_PASSWORD."
+    exit 1
+fi
+export DIB_RHSM_REPOS="rhel-6-server-rpms rhel-6-server-optional-rpms rhel-6-server-openstack-5.0-rpms"
+export DIB_REG_TYPE=portal
+export REG_METHOD=disable
+export REG_HALT_UNREGISTER=true
+
+yum update -y
+yum install -y qemu-kvm qemu-img kpartx
+cd $ROOT_DIR
+wget http://download.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
+rpm -ivh epel-release-6-8.noarch.rpm
+yum install -y python-argparse
+yum remove -y epel-release
+
+yum install -y git
+if [ ! -d $ROOT_DIR/sahara-image-elements ]; then
+    git clone https://github.com/openstack/sahara-image-elements.git
+fi
+if [ ! -d $ROOT_DIR/diskimage-builder ]; then
+    git clone https://github.com/openstack/diskimage-builder.git
+fi
+cd $ROOT_DIR/sahara-image-elements
+export SAHARA_ELEMENTS_COMMIT_ID=2014.2
+git checkout $SAHARA_ELEMENTS_COMMIT_ID
+cd $ROOT_DIR/diskimage-builder
+export DIB_COMMIT_ID=0.1.29
+git checkout $DIB_COMMIT_ID
+cd $ROOT_DIR
+sed -i '/epel-release/d' $ROOT_DIR/sahara-image-elements/elements/hadoop-hdp/install.d/30-init-hdp-install
+export BASE_ELEMENTS_PATH="$ROOT_DIR/diskimage-builder/elements"
+export SAHARA_ELEMENTS_PATH="$ROOT_DIR/sahara-image-elements/elements"
+export ELEMENTS_PATH=$BASE_ELEMENTS_PATH:$SAHARA_ELEMENTS_PATH
+
+export DIB_IMAGE_SIZE=10
+export DIB_HDP_VERSION=2.0
+export JAVA_TARGET_LOCATION=/opt
+export JAVA_DOWNLOAD_URL=https://s3.amazonaws.com/public-repo-1.hortonworks.com/ARTIFACTS/jdk-6u31-linux-x64.bin
+
+$ROOT_DIR/diskimage-builder/bin/disk-image-create "rhel hadoop-hdp redhat-lsb vm" -n -o sahara-rhel-6.6-hdp-2.0
